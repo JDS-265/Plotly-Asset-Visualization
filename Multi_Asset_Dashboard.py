@@ -29,7 +29,7 @@ st.set_page_config(
 # -----------------------------
 def parse_tickers(tickers_input):
     if tickers_input.strip() == "":
-        return ["AAPL", "MSFT", "AMZN", "TSLA", "NVDA"]
+        return ["UNH", "OKLO", "TSM", "AMD"]
 
     tickers = [
         ticker.strip().upper()
@@ -76,6 +76,53 @@ def format_number(value):
     if pd.isna(value):
         return "N/A"
     return f"{value:,.2f}"
+
+
+def format_money(value):
+    if pd.isna(value):
+        return "N/A"
+    return f"{value:,.2f}"
+
+
+def add_portfolio_value_columns(contribution_df, portfolio_value):
+    """
+    Add monetary portfolio columns using the sidebar Portfolio value as
+    the initial capital invested at the selected start date.
+
+    Financial logic:
+    Initial allocated value = portfolio_value * initial weight
+    Estimated shares = initial allocated value / first price
+    Current value = estimated shares * last price
+    Gain/Loss = current value - initial allocated value
+    """
+    portfolio_df = contribution_df.copy()
+
+    portfolio_df["Initial Allocated Value"] = (
+        portfolio_value * (portfolio_df["Weight"] / 100)
+    )
+
+    portfolio_df["Estimated Shares"] = (
+        portfolio_df["Initial Allocated Value"] / portfolio_df["First Price"]
+    )
+
+    portfolio_df["Current Value"] = (
+        portfolio_df["Estimated Shares"] * portfolio_df["Last Price"]
+    )
+
+    portfolio_df["Gain/Loss"] = (
+        portfolio_df["Current Value"] - portfolio_df["Initial Allocated Value"]
+    )
+
+    current_total_value = portfolio_df["Current Value"].sum()
+
+    if current_total_value != 0:
+        portfolio_df["Current Portfolio Weight"] = (
+            portfolio_df["Current Value"] / current_total_value
+        ) * 100
+    else:
+        portfolio_df["Current Portfolio Weight"] = float("nan")
+
+    return portfolio_df
 
 
 @st.cache_data(show_spinner=False)
@@ -418,44 +465,59 @@ def create_risk_return_scatter(metrics_df):
 
 
 def create_portfolio_pie_chart(contribution_df, portfolio_value):
-    portfolio_df = contribution_df.copy()
+    portfolio_df = add_portfolio_value_columns(contribution_df, portfolio_value)
 
-    portfolio_df["Allocated Value"] = portfolio_value * (portfolio_df["Weight"] / 100)
-
-    portfolio_df["Estimated Shares"] = (
-        portfolio_df["Allocated Value"] / portfolio_df["Latest Close Price"]
+    portfolio_initial_value = portfolio_df["Initial Allocated Value"].sum()
+    portfolio_current_value = portfolio_df["Current Value"].sum()
+    portfolio_gain_loss = portfolio_current_value - portfolio_initial_value
+    portfolio_total_return = (
+        portfolio_current_value / portfolio_initial_value - 1
+        if portfolio_initial_value != 0
+        else float("nan")
     )
+
+    # Build pre-formatted hover text instead of relying on indexed customdata.
+    # This is more reliable for Plotly pie charts and prevents NaN / '-' values
+    # from appearing in the tooltip.
+    hover_text = []
+
+    for _, row in portfolio_df.iterrows():
+        hover_text.append(
+            f"<b>{row['Ticker']}</b><br>"
+            f"Initial Weight: {row['Weight']:.2f}%<br>"
+            f"Initial Allocated Value: {format_money(row['Initial Allocated Value'])}<br>"
+            f"Asset Return Since Start: {format_percent(row['Asset Return'])}<br>"
+            f"Current Value Held: {format_money(row['Current Value'])}<br>"
+            f"Gain/Loss: {format_money(row['Gain/Loss'])}<br>"
+            f"First Price: {format_money(row['First Price'])}<br>"
+            f"Latest Close Price: {format_money(row['Last Price'])}<br>"
+            f"Estimated Shares Bought: {row['Estimated Shares']:,.4f}<br>"
+            f"Current Portfolio Weight: {row['Current Portfolio Weight']:.2f}%"
+        )
 
     fig = go.Figure()
 
     fig.add_trace(
         go.Pie(
             labels=portfolio_df["Ticker"],
-            values=portfolio_df["Weight"],
+            # Current Value makes the pie chart show the portfolio allocation today.
+            # The initial allocation is still visible in the hover tooltip.
+            values=portfolio_df["Current Value"],
             hole=0.35,
             textinfo="label+percent",
-            customdata=portfolio_df[
-                [
-                    "Allocated Value",
-                    "Latest Close Price",
-                    "Estimated Shares"
-                ]
-            ],
-            hovertemplate=(
-                "<b>%{label}</b><br>"
-                "Weight: %{percent}<br>"
-                "Allocated Value: %{customdata[0]:,.2f}<br>"
-                "Latest Close Price: %{customdata[1]:,.2f}<br>"
-                "Estimated Shares: %{customdata[2]:,.4f}"
-                "<extra></extra>"
-            )
+            hovertext=hover_text,
+            hoverinfo="text",
+            sort=False
         )
     )
 
     fig.update_layout(
         title=(
-            "Portfolio Allocation Pie Chart"
-            f"<br><sup>Total Portfolio Value: {portfolio_value:,.2f}</sup>"
+            "Portfolio Allocation Pie Chart - Current Value"
+            f"<br><sup>Initial Portfolio Value: {portfolio_initial_value:,.2f} | "
+            f"Current Portfolio Value: {portfolio_current_value:,.2f} | "
+            f"Gain/Loss: {portfolio_gain_loss:,.2f} | "
+            f"Total Return: {portfolio_total_return:.2%}</sup>"
         ),
         template="plotly_white",
         height=650,
@@ -470,24 +532,11 @@ def create_portfolio_pie_chart(contribution_df, portfolio_value):
 
     return fig
 
-
 def create_waterfall_chart(contribution_df, portfolio_total_return, portfolio_value):
-    contribution_df = contribution_df.copy()
-
-    contribution_df["Initial Allocated Value"] = (
-        portfolio_value * (contribution_df["Weight"] / 100)
-    )
-
-    contribution_df["Final Value"] = (
-        contribution_df["Initial Allocated Value"] * (1 + contribution_df["Asset Return"])
-    )
-
-    contribution_df["Gain/Loss"] = (
-        contribution_df["Final Value"] - contribution_df["Initial Allocated Value"]
-    )
+    contribution_df = add_portfolio_value_columns(contribution_df, portfolio_value)
 
     portfolio_initial_value = contribution_df["Initial Allocated Value"].sum()
-    portfolio_final_value = contribution_df["Final Value"].sum()
+    portfolio_final_value = contribution_df["Current Value"].sum()
     portfolio_gain_loss = contribution_df["Gain/Loss"].sum()
 
     waterfall_labels = list(contribution_df["Ticker"]) + ["Portfolio Total"]
@@ -507,7 +556,7 @@ def create_waterfall_chart(contribution_df, portfolio_total_return, portfolio_va
             row["Asset Return"],
             row["Return Contribution"],
             row["Initial Allocated Value"],
-            row["Final Value"],
+            row["Current Value"],
             row["Gain/Loss"]
         ])
 
@@ -540,7 +589,7 @@ def create_waterfall_chart(contribution_df, portfolio_total_return, portfolio_va
                 "Asset / Portfolio Return: %{customdata[2]:.2%}<br>"
                 "Return Contribution: %{customdata[3]:.2%}<br>"
                 "Initial Value: %{customdata[4]:,.2f}<br>"
-                "Final Value: %{customdata[5]:,.2f}<br>"
+                "Current Value: %{customdata[5]:,.2f}<br>"
                 "Gain/Loss: %{customdata[6]:,.2f}"
                 "<extra></extra>"
             )
@@ -920,6 +969,10 @@ highest_volatility = metrics_df.sort_values("Annualized Volatility", ascending=F
 
 correlation_matrix = daily_returns.corr()
 
+portfolio_initial_value = portfolio_value
+portfolio_current_value = portfolio_initial_value * (1 + portfolio_total_return)
+portfolio_gain_loss = portfolio_current_value - portfolio_initial_value
+
 
 # -----------------------------
 # 10. Key metrics
@@ -940,7 +993,7 @@ col4.metric(
     f"({format_percent(highest_volatility['Annualized Volatility'])})"
 )
 
-col5, col6, col7 = st.columns(3)
+col5, col6, col7, col8 = st.columns(4)
 
 col5.metric(
     "Highest Annualized Return",
@@ -949,6 +1002,11 @@ col5.metric(
 )
 col6.metric("Start Date", str(prices.index[0].date()))
 col7.metric("End Date", str(prices.index[-1].date()))
+col8.metric(
+    "Current Portfolio Value",
+    format_money(portfolio_current_value),
+    delta=format_percent(portfolio_total_return)
+)
 
 
 # -----------------------------
@@ -972,6 +1030,35 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
 # Tab 1 - Performance
 # -----------------------------
 with tab1:
+    st.subheader("Portfolio Value Evolution")
+
+    perf_col1, perf_col2, perf_col3, perf_col4 = st.columns(4)
+
+    perf_col1.metric(
+        "Initial Portfolio Value",
+        format_money(portfolio_initial_value)
+    )
+
+    perf_col2.metric(
+        "Current Portfolio Value",
+        format_money(portfolio_current_value),
+        delta=format_percent(portfolio_total_return)
+    )
+
+    perf_col3.metric(
+        "Portfolio Gain/Loss",
+        format_money(portfolio_gain_loss)
+    )
+
+    perf_col4.metric(
+        "Portfolio Total Return",
+        format_percent(portfolio_total_return)
+    )
+
+    st.write(
+        "Current Portfolio Value = Initial Portfolio Value × (1 + Portfolio Total Return)."
+    )
+
     st.subheader("Multi-Asset Cumulative Returns")
 
     fig = create_cumulative_returns_chart(cumulative_returns)
@@ -1110,10 +1197,32 @@ with tab5:
         }
     )
 
+    allocation_display_df = add_portfolio_value_columns(
+        contribution_df,
+        portfolio_value
+    )[
+        [
+            "Ticker",
+            "Weight",
+            "Initial Allocated Value",
+            "Asset Return",
+            "Current Value",
+            "Gain/Loss",
+            "Estimated Shares",
+            "First Price",
+            "Last Price",
+            "Current Portfolio Weight"
+        ]
+    ].copy()
+
+    with st.expander("View portfolio allocation values"):
+        st.dataframe(allocation_display_df, width="stretch")
+
     st.write(
         """
-        The pie chart shows portfolio weights.
-        It helps identify concentration risk and diversification structure.
+        The pie chart shows the initial allocation based on the portfolio weights.
+        Hover over each slice to see the initial allocated value, current value held,
+        estimated shares, gain/loss and current portfolio weight.
         """
     )
 
@@ -1282,6 +1391,19 @@ with tab8:
         file_name=excel_filename,
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
+    with st.expander("View portfolio value summary"):
+        portfolio_summary_df = pd.DataFrame(
+            [
+                {
+                    "Initial Portfolio Value": portfolio_initial_value,
+                    "Current Portfolio Value": portfolio_current_value,
+                    "Portfolio Gain/Loss": portfolio_gain_loss,
+                    "Portfolio Total Return": portfolio_total_return
+                }
+            ]
+        )
+        st.dataframe(portfolio_summary_df, width="stretch")
 
     with st.expander("View asset metrics"):
         metrics_display_df = metrics_df.copy()
