@@ -465,62 +465,113 @@ def create_risk_return_scatter(metrics_df):
 
 
 def create_portfolio_pie_chart(contribution_df, portfolio_value):
-    portfolio_df = add_portfolio_value_columns(contribution_df, portfolio_value)
+    portfolio_df = contribution_df.copy()
 
-    portfolio_initial_value = portfolio_df["Initial Allocated Value"].sum()
-    portfolio_current_value = portfolio_df["Current Value"].sum()
-    portfolio_gain_loss = portfolio_current_value - portfolio_initial_value
-    portfolio_total_return = (
-        portfolio_current_value / portfolio_initial_value - 1
-        if portfolio_initial_value != 0
-        else float("nan")
+    # ------------------------------------------------------
+    # Financial calculations based on the sidebar inputs
+    # ------------------------------------------------------
+    # The pie chart itself uses the INITIAL WEIGHTS entered
+    # in the sidebar. This means:
+    # - the chart reflects the user's allocation input;
+    # - when a ticker is hidden in the legend, Plotly
+    #   automatically recalculates the visible weights.
+    # ------------------------------------------------------
+
+    portfolio_df["Initial Allocated Value"] = (
+        portfolio_value * (portfolio_df["Weight"] / 100)
     )
 
-    # Build pre-formatted hover text instead of relying on indexed customdata.
-    # This is more reliable for Plotly pie charts and prevents NaN / '-' values
-    # from appearing in the tooltip.
-    hover_text = []
+    portfolio_df["Estimated Shares"] = (
+        portfolio_df["Initial Allocated Value"] / portfolio_df["First Price"]
+    )
 
-    for _, row in portfolio_df.iterrows():
-        hover_text.append(
-            f"<b>{row['Ticker']}</b><br>"
-            f"Initial Weight: {row['Weight']:.2f}%<br>"
-            f"Initial Allocated Value: {format_money(row['Initial Allocated Value'])}<br>"
-            f"Asset Return Since Start: {format_percent(row['Asset Return'])}<br>"
-            f"Current Value Held: {format_money(row['Current Value'])}<br>"
-            f"Gain/Loss: {format_money(row['Gain/Loss'])}<br>"
-            f"First Price: {format_money(row['First Price'])}<br>"
-            f"Latest Close Price: {format_money(row['Last Price'])}<br>"
+    portfolio_df["Current Value"] = (
+        portfolio_df["Estimated Shares"] * portfolio_df["Last Price"]
+    )
+
+    portfolio_df["Gain/Loss"] = (
+        portfolio_df["Current Value"] - portfolio_df["Initial Allocated Value"]
+    )
+
+    portfolio_initial_value = portfolio_value
+    portfolio_current_value = portfolio_df["Current Value"].sum()
+    portfolio_gain_loss = portfolio_current_value - portfolio_initial_value
+
+    if portfolio_initial_value != 0:
+        portfolio_total_return = portfolio_gain_loss / portfolio_initial_value
+    else:
+        portfolio_total_return = 0
+
+    # Current market weight based on how much each position is worth today.
+    # This is different from the initial sidebar weight.
+    if portfolio_current_value != 0:
+        portfolio_df["Current Market Weight"] = (
+            portfolio_df["Current Value"] / portfolio_current_value
+        ) * 100
+    else:
+        portfolio_df["Current Market Weight"] = 0.0
+
+    # Build static hover details as text.
+    # We use text instead of customdata because text is more stable for go.Pie.
+    # The dynamic visible percentage is still handled by Plotly with %{percent}.
+    portfolio_df["Hover Details"] = portfolio_df.apply(
+        lambda row: (
+            f"Initial Weight in Full Portfolio: {row['Weight']:.2f}%<br>"
+            f"Initial Allocated Value: {row['Initial Allocated Value']:,.2f}<br>"
+            f"Asset Return Since Start: {row['Asset Return']:.2%}<br>"
+            f"Current Value Held: {row['Current Value']:,.2f}<br>"
+            f"Gain/Loss: {row['Gain/Loss']:,.2f}<br>"
+            f"First Price: {row['First Price']:,.2f}<br>"
+            f"Latest Close Price: {row['Last Price']:,.2f}<br>"
             f"Estimated Shares Bought: {row['Estimated Shares']:,.4f}<br>"
-            f"Current Portfolio Weight: {row['Current Portfolio Weight']:.2f}%"
-        )
+            f"Current Market Weight in Full Portfolio: {row['Current Market Weight']:.2f}%"
+        ),
+        axis=1
+    )
 
     fig = go.Figure()
 
     fig.add_trace(
         go.Pie(
             labels=portfolio_df["Ticker"],
-            # Current Value makes the pie chart show the portfolio allocation today.
-            # The initial allocation is still visible in the hover tooltip.
-            values=portfolio_df["Current Value"],
+
+            # This is the key correction:
+            # use the sidebar weights, not Current Value.
+            values=portfolio_df["Weight"],
+
             hole=0.35,
+
+            # Plotly recalculates this percentage automatically
+            # when you hide/show tickers in the legend.
             textinfo="label+percent",
-            hovertext=hover_text,
-            hoverinfo="text",
+
+            # Static details used only in the hover box.
+            text=portfolio_df["Hover Details"],
+            hovertemplate=(
+                "<b>%{label}</b><br>"
+                "Visible Allocation Weight: %{percent}<br>"
+                "%{text}"
+                "<extra></extra>"
+            ),
+
+            # Keeps the same order as the sidebar ticker input.
             sort=False
         )
     )
 
     fig.update_layout(
         title=(
-            "Portfolio Allocation Pie Chart - Current Value"
-            f"<br><sup>Initial Portfolio Value: {portfolio_initial_value:,.2f} | "
+            "Portfolio Allocation Pie Chart - Sidebar Weights"
+            f"<br><sup>"
+            f"Initial Portfolio Value: {portfolio_initial_value:,.2f} | "
             f"Current Portfolio Value: {portfolio_current_value:,.2f} | "
             f"Gain/Loss: {portfolio_gain_loss:,.2f} | "
-            f"Total Return: {portfolio_total_return:.2%}</sup>"
+            f"Total Return: {portfolio_total_return:.2%}"
+            f"</sup>"
         ),
         template="plotly_white",
         height=650,
+        legend_title_text="Click a ticker to hide/show it",
         legend=dict(
             orientation="h",
             yanchor="bottom",
@@ -879,7 +930,7 @@ st.sidebar.title("Dashboard Settings")
 
 tickers_input = st.sidebar.text_input(
     "Tickers",
-    value="AAPL, MSFT, AMZN, TSLA, NVDA",
+    value="UNH, OKLO, TSM, AMD",
     help="Separate tickers with commas."
 )
 
