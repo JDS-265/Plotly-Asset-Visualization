@@ -1478,33 +1478,8 @@ Possible future upgrades:
 
 ---
 
-## 42. Suggested GitHub Description
 
-```text
-Interactive Streamlit multi-asset financial dashboard built with Python, pandas, yfinance and Plotly. Includes cumulative returns, risk-return analysis, correlation heatmap, allocation analysis, contribution waterfall, single-asset technical detail and Excel export.
-```
-
----
-
-## 43. Suggested GitHub Topics
-
-```text
-python
-streamlit
-pandas
-yfinance
-plotly
-financial-analysis
-portfolio-analysis
-quant-finance
-data-visualization
-stock-market
-excel-export
-```
-
----
-
-## 44. Final Notes
+## 42. Final Notes
 
 This project is a practical Python for Finance dashboard.
 
