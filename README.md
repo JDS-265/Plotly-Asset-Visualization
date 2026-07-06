@@ -60,8 +60,6 @@ The project folder should look like this:
 ```text
 Plotly Asset Visualization Program
 │
-├── .vscode
-│   └── launch.json
 │
 ├── Data
 │   └── exported Excel files
@@ -191,7 +189,7 @@ should contain:
       "name": "Run Multi-Asset Streamlit Dashboard - Python 3.14",
       "type": "debugpy",
       "request": "launch",
-      "python": "C:/Users/Lenovo/AppData/Local/Python/pythoncore-3.14-64/python.exe",
+      "python": "C:/XXXX/XXXX/XXXX/XXXXX/Python/pythoncore-3.14-64/python.exe",
       "module": "streamlit",
       "args": [
         "run",
@@ -213,7 +211,7 @@ py -3.14 -c "import sys; print(sys.executable)"
 Then replace this part:
 
 ```json
-"python": "C:/Users/Lenovo/AppData/Local/Python/pythoncore-3.14-64/python.exe"
+"python": "C:/XXXX/XXXX/XXXX/XXXX/Python/pythoncore-3.14-64/python.exe"
 ```
 
 with the path returned by the terminal.
